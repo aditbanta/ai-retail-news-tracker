@@ -5,6 +5,9 @@ on:
     - cron: '0 9 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   fetch-news:
     runs-on: ubuntu-latest
@@ -12,6 +15,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -26,9 +32,16 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python daily_news.py
 
-      - name: Upload CSV as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AI-Retail-News-Log
-          path: AI_Retail_News_Log.csv
-          retention-days: 90
+      - name: Commit and push updated CSV
+        env:
+          PAT: ${{ secrets.PAT_TOKEN }}
+        run: |
+          git config user.name "AI News Bot"
+          git config user.email "bot@valueretail.com"
+          git add AI_Retail_News_Log.csv
+          if git diff --cached --quiet; then
+            echo "No new articles found today."
+          else
+            git commit -m "📰 Daily AI retail news update - $(date +'%Y-%m-%d')"
+            git push https://x-access-token:${PAT}@github.com/${{ github.repository }}.git
+          fi
