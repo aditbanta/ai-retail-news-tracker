@@ -2,12 +2,11 @@ name: Daily AI Retail News Tracker
 
 on:
   schedule:
-    # 9 AM UTC = 10 AM UK (BST, summer)
-    # Adjust to "0 10 * * *" in winter (GMT)
     - cron: '0 9 * * *'
-  
-  # Allows you to run manually from GitHub
   workflow_dispatch:
+
+permissions:
+  contents: write    # <-- THIS LINE FIXES EXIT CODE 128
 
 jobs:
   fetch-news:
@@ -16,6 +15,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
