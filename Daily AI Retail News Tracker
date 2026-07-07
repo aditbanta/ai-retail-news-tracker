@@ -1,0 +1,39 @@
+name: Daily AI Retail News Tracker
+
+on:
+  schedule:
+    # 9 AM UTC = 10 AM UK (BST, summer)
+    # Adjust to "0 10 * * *" in winter (GMT)
+    - cron: '0 9 * * *'
+  
+  # Allows you to run manually from GitHub
+  workflow_dispatch:
+
+jobs:
+  fetch-news:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run news tracker
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python daily_news.py
+
+      - name: Commit and push updated CSV
+        run: |
+          git config user.name "AI News Bot"
+          git config user.email "bot@valueretail.com"
+          git add AI_Retail_News_Log.csv
+          git diff --cached --quiet || git commit -m "📰 Daily AI retail news update - $(date +'%Y-%m-%d')"
+          git push
