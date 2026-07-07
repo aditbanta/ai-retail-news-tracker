@@ -44,7 +44,7 @@ KEYWORDS = [
 CSV_FILE = "AI_Retail_News_Log.csv"
 CSV_HEADERS = ["Date", "Article Summary", "Link", "Source"]
 
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
 LOOKBACK_HOURS = 24
 SKIP_TOKEN = "SKIP"
 
