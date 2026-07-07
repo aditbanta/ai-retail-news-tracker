@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,9 +33,15 @@ jobs:
         run: python daily_news.py
 
       - name: Commit and push updated CSV
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "📰 Daily AI retail news update"
-          file_pattern: "AI_Retail_News_Log.csv"
-          commit_user_name: "AI News Bot"
-          commit_user_email: "bot@valueretail.com"
+        env:
+          PAT: ${{ secrets.PAT_TOKEN }}
+        run: |
+          git config user.name "AI News Bot"
+          git config user.email "bot@valueretail.com"
+          git add AI_Retail_News_Log.csv
+          if git diff --cached --quiet; then
+            echo "No new articles found today."
+          else
+            git commit -m "📰 Daily AI retail news update - $(date +'%Y-%m-%d')"
+            git push https://x-access-token:${PAT}@github.com/${{ github.repository }}.git
+          fi
