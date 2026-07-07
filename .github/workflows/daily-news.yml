@@ -26,10 +26,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python daily_news.py
 
-      - name: Commit and push updated CSV
-        run: |
-          git config user.name "AI News Bot"
-          git config user.email "bot@valueretail.com"
-          git add AI_Retail_News_Log.csv
-          git diff --cached --quiet || git commit -m "📰 Daily AI retail news update - $(date +'%Y-%m-%d')"
-          git push
+      - name: Upload CSV as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Retail-News-Log
+          path: AI_Retail_News_Log.csv
+          retention-days: 90
