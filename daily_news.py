@@ -79,6 +79,7 @@ ANALYSIS_PROMPT_TEMPLATE = (
 )
 
 ANALYSIS_MAX_TOKENS = 2000
+ANALYSIS_ARCHIVE_DIR = "analysis"
 
 # Email configuration
 EMAIL_RECIPIENT = "abanta@valueretail.com"
@@ -253,10 +254,17 @@ def call_claude_analysis(client, articles, retries=2, backoff=2.0):
 
 def save_analysis_files(analysis_text, date_str):
     """
-    Save the analysis text to a dated markdown file and overwrite
-    LATEST_ANALYSIS.md. Returns the dated filename, or None on failure.
+    Save the analysis text to a dated markdown file under ANALYSIS_ARCHIVE_DIR/
+    and overwrite LATEST_ANALYSIS.md at the repo root. Returns the dated
+    filename (including its subfolder path), or None on failure.
     """
-    dated_filename = f"daily_analysis_{date_str}.md"
+    try:
+        os.makedirs(ANALYSIS_ARCHIVE_DIR, exist_ok=True)
+    except Exception as e:
+        print(f"Error: failed to create '{ANALYSIS_ARCHIVE_DIR}/' directory: {e}")
+        return None
+
+    dated_filename = os.path.join(ANALYSIS_ARCHIVE_DIR, f"daily_analysis_{date_str}.md")
     try:
         with open(dated_filename, "w", encoding="utf-8") as f:
             f.write(analysis_text)
