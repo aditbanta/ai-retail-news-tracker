@@ -46,8 +46,18 @@ KEYWORDS = [
 CSV_FILE = "AI_Retail_News_Log.csv"
 CSV_HEADERS = ["Date", "Article Summary", "Link", "Source"]
 
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
-ANALYSIS_MODEL = "claude-3-5-sonnet-20241022"
+# Some feeds reject feedparser's default user-agent and return an HTML
+# error page instead of XML (causing "not well-formed" parse errors).
+# A browser-like UA avoids that in most cases.
+FEED_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
+CLAUDE_MODEL = "claude-sonnet-5"
+ANALYSIS_MODEL = "claude-sonnet-5"
 LOOKBACK_HOURS = 24
 SKIP_TOKEN = "SKIP"
 
@@ -159,7 +169,7 @@ def get_entry_link(entry):
 def fetch_feed_entries(feed_url):
     """Fetch and parse a single RSS feed. Returns a list of entries."""
     try:
-        parsed = feedparser.parse(feed_url)
+        parsed = feedparser.parse(feed_url, request_headers=FEED_REQUEST_HEADERS)
         if parsed.bozo and not parsed.entries:
             print(f"Warning: feed '{feed_url}' could not be parsed cleanly "
                   f"({parsed.bozo_exception}). Skipping.")
