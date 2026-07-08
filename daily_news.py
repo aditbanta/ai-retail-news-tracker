@@ -47,6 +47,7 @@ CSV_FILE = "AI_Retail_News_Log.csv"
 CSV_HEADERS = ["Date", "Article Summary", "Link", "Source"]
 
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
+ANALYSIS_MODEL = "claude-3-5-sonnet-20241022"
 LOOKBACK_HOURS = 24
 SKIP_TOKEN = "SKIP"
 
@@ -229,7 +230,7 @@ def call_claude_analysis(client, articles, retries=2, backoff=2.0):
     for attempt in range(1, retries + 2):
         try:
             response = client.messages.create(
-                model=CLAUDE_MODEL,
+                model=ANALYSIS_MODEL,
                 max_tokens=ANALYSIS_MAX_TOKENS,
                 messages=[{"role": "user", "content": prompt}],
             )
