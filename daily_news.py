@@ -442,6 +442,17 @@ def main():
         print("Analysis saved to 'LATEST_ANALYSIS.md' only (dated file failed).")
 
     send_email(email_subject, analysis_text)
+    # Send email with today's analysis
+if analysis_text:
+    send_email(
+        subject=f"🤖 AI Retail Intel - {datetime.now().strftime('%d %b %Y')}",
+        body=analysis_text
+    )
+else:
+    send_email(
+        subject=f"🤖 AI Retail Intel - {datetime.now().strftime('%d %b %Y')}",
+        body="No significant AI retail news found in the last 24 hours."
+    )
 
 
 if __name__ == "__main__":
