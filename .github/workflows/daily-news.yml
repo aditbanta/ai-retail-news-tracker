@@ -25,10 +25,11 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
           for var in SMTP_SERVER SMTP_PORT SMTP_USER SMTP_PASSWORD; do
-            if [ -z "${!var}" ]; then
+            val="${!var}"
+            if [ -z "$val" ]; then
               echo "$var is EMPTY or NOT SET"
             else
-              echo "$var is set (length: ${#!var})"
+              echo "$var is set (length: ${#val})"
             fi
           done
       - name: Run news tracker
