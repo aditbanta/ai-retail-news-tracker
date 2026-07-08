@@ -1,42 +1,63 @@
 name: Daily AI Retail News Tracker
-
 on:
   schedule:
     - cron: '0 9 * * *'
   workflow_dispatch:
-
 jobs:
   fetch-news:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.PAT_TOKEN }}
-          persist-credentials: true
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
+      - name: Debug - check SMTP secrets are visible
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          for var in SMTP_SERVER SMTP_PORT SMTP_USER SMTP_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              echo "$var is EMPTY or NOT SET"
+            else
+              echo "$var is set (length: ${#!var})"
+            fi
+          done
       - name: Run news tracker
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: python daily_news.py
-
-      - name: Commit and push updated CSV
+      - name: Commit and push generated files
         run: |
-          git config user.name "AI News Bot"
-          git config user.email "bot@valueretail.com"
-          git add AI_Retail_News_Log.csv
-          if git diff --cached --quiet; then
-            echo "No new articles found today."
-          else
-            git commit -m "📰 Daily AI retail news update - $(date +'%Y-%m-%d')"
-            git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/aditbanta/ai-retail-news-tracker.git main
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add AI_Retail_News_Log.csv LATEST_ANALYSIS.md analysis/daily_analysis_*.md 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "Daily AI retail news update: $(date -u +%Y-%m-%d)"
+          git push
+      - name: Upload CSV as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Retail-News-Log
+          path: AI_Retail_News_Log.csv
+          retention-days: 90
+      - name: Upload analysis files as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Retail-Analysis
+          path: |
+            LATEST_ANALYSIS.md
+            analysis/daily_analysis_*.md
+          retention-days: 90
+          if-no-files-found: ignore
