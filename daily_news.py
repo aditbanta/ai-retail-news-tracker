@@ -442,7 +442,6 @@ def main():
         print("Analysis saved to 'LATEST_ANALYSIS.md' only (dated file failed).")
 
     send_email(email_subject, analysis_text)
-    # Send email with today's analysis
 
 
 if __name__ == "__main__":
