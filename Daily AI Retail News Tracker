@@ -6,6 +6,8 @@ on:
 jobs:
   fetch-news:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -23,6 +25,13 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: python daily_news.py
+      - name: Commit and push generated files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add AI_Retail_News_Log.csv LATEST_ANALYSIS.md analysis/daily_analysis_*.md 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "Daily AI retail news update: $(date -u +%Y-%m-%d)"
+          git push
       - name: Upload CSV as artifact
         uses: actions/upload-artifact@v4
         with:
@@ -35,6 +44,6 @@ jobs:
           name: AI-Retail-Analysis
           path: |
             LATEST_ANALYSIS.md
-            daily_analysis_*.md
+            analysis/daily_analysis_*.md
           retention-days: 90
           if-no-files-found: ignore
