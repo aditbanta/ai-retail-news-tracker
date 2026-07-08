@@ -16,6 +16,7 @@ Usage:
 import os
 import sys
 import csv
+import json
 import time
 import smtplib
 from email.mime.text import MIMEText
@@ -32,6 +33,10 @@ RSS_FEEDS = [
     "https://www.retaildive.com/feeds/news/",
     "https://www.voguebusiness.com/rss",
     "https://risnews.com/rss.xml",
+    "https://wwd.com/feed/",
+    "https://www.drapersonline.com/feed",
+    "https://www.theguardian.com/fashion/rss",
+    "https://www.retaildesignblog.net/feed",
 ]
 
 KEYWORDS = [
@@ -67,6 +72,28 @@ PROMPT_TEMPLATE = (
     "1-sentence summary focused on what matters for luxury retail, "
     "leasing, or fashion. If this is generic AI hype with no concrete "
     "retail example, respond with 'SKIP'. Title: {title}. Summary: {summary}"
+)
+
+# Web search stage: casts a wider net than the fixed RSS feeds by letting
+# Claude search the open web directly for AI-related retail/fashion/leasing
+# news from the last 24 hours.
+WEB_SEARCH_MAX_USES = 6
+WEB_SEARCH_MAX_TOKENS = 2000
+WEB_SEARCH_PROMPT = (
+    "Search the web for news articles published in the last 24 hours about "
+    "artificial intelligence, machine learning, generative AI, computer "
+    "vision, or ChatGPT as they relate to retail, fashion, or commercial "
+    "leasing. Run several distinct searches to cover different angles "
+    "(e.g. AI in luxury retail, AI-driven leasing/pricing, AI in fashion "
+    "brands, AI in-store technology). "
+    "After searching, respond with ONLY a JSON array (no markdown code "
+    "fences, no commentary before or after) of the genuinely relevant, "
+    "substantive articles you found. Each element must be an object with "
+    "these exact fields: \"title\", \"summary\" (1-2 sentences), \"link\" "
+    "(the article URL), and \"source\" (the publication name). Exclude "
+    "generic AI hype pieces with no concrete retail example, and exclude "
+    "anything not published in roughly the last 24 hours. If you find "
+    "nothing that qualifies, respond with an empty JSON array: []"
 )
 
 ANALYSIS_PROMPT_TEMPLATE = (
@@ -210,6 +237,101 @@ def call_claude(client, title, summary, retries=2, backoff=2.0):
             print(f"  Unexpected error calling Claude API: {e}")
             return None
     return None
+
+
+def call_claude_web_search(client, retries=2, backoff=2.0):
+    """
+    Use Claude's built-in web search tool to find AI-related retail/
+    fashion/leasing news from across the web, beyond the fixed RSS feeds.
+    Returns a list of dicts with keys title/summary/link/source, or an
+    empty list if nothing qualifies or the call fails after retries.
+    """
+    for attempt in range(1, retries + 2):
+        try:
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=WEB_SEARCH_MAX_TOKENS,
+                tools=[{
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": WEB_SEARCH_MAX_USES,
+                }],
+                messages=[{"role": "user", "content": WEB_SEARCH_PROMPT}],
+            )
+            # Only the final text blocks contain Claude's answer; search
+            # activity shows up as separate server_tool_use /
+            # web_search_tool_result blocks, which we ignore here.
+            text_parts = [
+                block.text for block in response.content
+                if getattr(block, "type", None) == "text"
+            ]
+            raw_text = "".join(text_parts).strip()
+
+            # Defensively strip markdown code fences in case Claude adds
+            # them despite instructions not to.
+            cleaned = raw_text
+            if cleaned.startswith("```"):
+                cleaned = cleaned.strip("`")
+                if cleaned.lower().startswith("json"):
+                    cleaned = cleaned[4:]
+                cleaned = cleaned.strip()
+
+            try:
+                articles = json.loads(cleaned)
+            except json.JSONDecodeError:
+                print(f"  Warning: web search response was not valid JSON "
+                      f"(first 200 chars): {raw_text[:200]!r}")
+                return []
+
+            if not isinstance(articles, list):
+                print("  Warning: web search response JSON was not a list. Ignoring.")
+                return []
+
+            # Keep only well-formed entries with the fields we need.
+            valid_articles = [
+                a for a in articles
+                if isinstance(a, dict) and a.get("title") and a.get("link")
+            ]
+            return valid_articles
+
+        except (APIStatusError, APIConnectionError, APIError) as e:
+            print(f"  Claude API error on web search attempt {attempt}: {e}")
+            if attempt <= retries:
+                time.sleep(backoff * attempt)
+            else:
+                return []
+        except Exception as e:
+            print(f"  Unexpected error during web search: {e}")
+            return []
+    return []
+
+
+def process_candidate_article(client, title, summary, link, source, existing_links):
+    """
+    Shared pipeline for a single candidate article, regardless of whether
+    it came from an RSS feed or the web search stage: checks for a
+    duplicate link, then calls Claude for a retail-focused summary and
+    applies the SKIP filter.
+
+    Returns a tuple (status, row, article) where status is one of
+    'duplicate', 'error', 'skipped_hype', or 'added'. row and article are
+    only populated when status == 'added'.
+    """
+    if link in existing_links:
+        return ("duplicate", None, None)
+
+    claude_response = call_claude(client, title, summary)
+
+    if claude_response is None:
+        return ("error", None, None)
+
+    if claude_response.strip().upper() == SKIP_TOKEN:
+        return ("skipped_hype", None, None)
+
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    row = [date_str, claude_response, link, source]
+    article = {"title": title, "summary": summary, "source": source, "link": link}
+    return ("added", row, article)
 
 
 def format_articles_for_analysis(articles):
@@ -390,31 +512,60 @@ def main():
 
             total_found += 1
 
-            if link in existing_links:
-                total_skipped_dupe += 1
-                continue
-
             print(f"  -> Analyzing: {title[:80]}")
-            claude_response = call_claude(client, title, summary)
+            status, row, article = process_candidate_article(
+                client, title, summary, link, feed_url, existing_links
+            )
 
-            if claude_response is None:
+            if status == "duplicate":
+                total_skipped_dupe += 1
+            elif status == "error":
                 total_errors += 1
                 print("     Skipped due to API error.")
-                continue
-
-            if claude_response.strip().upper() == SKIP_TOKEN:
+            elif status == "skipped_hype":
                 total_skipped_claude += 1
                 print("     Claude judged this generic AI hype. Skipped.")
-                continue
+            elif status == "added":
+                rows_to_write.append(row)
+                todays_articles.append(article)
+                existing_links.add(link)  # prevent intra-run duplicates too
+                total_added += 1
 
-            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            rows_to_write.append([date_str, claude_response, link, feed_url])
-            todays_articles.append({
-                "title": title,
-                "summary": summary,
-                "source": feed_url,
-                "link": link,
-            })
+    # ------------------------------------------------------------------
+    # Web search stage: broaden coverage beyond the fixed RSS feeds by
+    # letting Claude search the open web directly for AI retail news.
+    # ------------------------------------------------------------------
+    print("\nRunning supplemental web search for AI retail news...")
+    web_articles = call_claude_web_search(client)
+    print(f"  {len(web_articles)} candidate article(s) found via web search.")
+
+    for art in web_articles:
+        title = art.get("title", "") or ""
+        summary = art.get("summary", "") or ""
+        link = art.get("link", "") or ""
+        source = art.get("source", "") or "Web Search"
+
+        if not link:
+            continue
+
+        total_found += 1
+
+        print(f"  -> Analyzing: {title[:80]}")
+        status, row, article = process_candidate_article(
+            client, title, summary, link, source, existing_links
+        )
+
+        if status == "duplicate":
+            total_skipped_dupe += 1
+        elif status == "error":
+            total_errors += 1
+            print("     Skipped due to API error.")
+        elif status == "skipped_hype":
+            total_skipped_claude += 1
+            print("     Claude judged this generic AI hype. Skipped.")
+        elif status == "added":
+            rows_to_write.append(row)
+            todays_articles.append(article)
             existing_links.add(link)  # prevent intra-run duplicates too
             total_added += 1
 
