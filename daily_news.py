@@ -119,7 +119,7 @@ ANALYSIS_MAX_TOKENS = 2000
 ANALYSIS_ARCHIVE_DIR = "analysis"
 
 # Email configuration
-EMAIL_RECIPIENTS = "abanta@valueretail.com", "ofriedman@valueretail.com"
+EMAIL_RECIPIENTS = "abanta@valueretail.com", "ofriedman@valueretail.com", "lgriffith@valueretail.com"
 NO_NEWS_EMAIL_BODY = "No significant AI retail news found in the last 24 hours."
 
 
@@ -445,7 +445,7 @@ def send_email(subject, body):
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = smtp_user
-    msg["To"] = EMAIL_RECIPIENTS
+    msg["To"] = ", ".join(EMAIL_RECIPIENTS)
 
     try:
         # Port 465 conventionally means implicit SSL; otherwise use
