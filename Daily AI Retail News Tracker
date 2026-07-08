@@ -12,6 +12,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,11 +27,20 @@ jobs:
       - name: Run news tracker
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: python daily_news.py
 
-      - name: Upload CSV as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AI-Retail-News-Log
-          path: AI_Retail_News_Log.csv
-          retention-days: 90
+      - name: Commit and push updated files
+        run: |
+          git config user.name "AI News Bot"
+          git config user.email "bot@valueretail.com"
+          git add AI_Retail_News_Log.csv LATEST_ANALYSIS.md daily_analysis_*.md
+          if git diff --cached --quiet; then
+            echo "No new articles found today."
+          else
+            git commit -m "📰 Daily AI retail news update - $(date +'%Y-%m-%d')"
+            git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/aditbanta/ai-retail-news-tracker.git main
+          fi
