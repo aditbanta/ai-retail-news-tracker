@@ -119,7 +119,7 @@ ANALYSIS_MAX_TOKENS = 2000
 ANALYSIS_ARCHIVE_DIR = "analysis"
 
 # Email configuration
-EMAIL_RECIPIENT = "abanta@valueretail.com"
+EMAIL_RECIPIENTS = "abanta@valueretail.com", "ofriedman@valueretail.com"
 NO_NEWS_EMAIL_BODY = "No significant AI retail news found in the last 24 hours."
 
 
@@ -445,7 +445,7 @@ def send_email(subject, body):
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = smtp_user
-    msg["To"] = EMAIL_RECIPIENT
+    msg["To"] = EMAIL_RECIPIENTS
 
     try:
         # Port 465 conventionally means implicit SSL; otherwise use
@@ -453,13 +453,13 @@ def send_email(subject, body):
         if smtp_port == 465:
             with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30) as server:
                 server.login(smtp_user, smtp_password)
-                server.sendmail(smtp_user, [EMAIL_RECIPIENT], msg.as_string())
+                server.sendmail(smtp_user, [EMAIL_RECIPIENTS], msg.as_string())
         else:
             with smtplib.SMTP(smtp_server, smtp_port, timeout=30) as server:
                 server.starttls()
                 server.login(smtp_user, smtp_password)
-                server.sendmail(smtp_user, [EMAIL_RECIPIENT], msg.as_string())
-        print(f"Email sent to {EMAIL_RECIPIENT}.")
+                server.sendmail(smtp_user, [EMAIL_RECIPIENTS], msg.as_string())
+        print(f"Email sent to {EMAIL_RECIPIENTS}.")
         return True
     except Exception as e:
         print(f"Error: failed to send email: {e}")
