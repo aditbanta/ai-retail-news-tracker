@@ -17,6 +17,8 @@ import os
 import sys
 import csv
 import time
+import smtplib
+from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone
 
 import feedparser
@@ -44,7 +46,7 @@ KEYWORDS = [
 CSV_FILE = "AI_Retail_News_Log.csv"
 CSV_HEADERS = ["Date", "Article Summary", "Link", "Source"]
 
-CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
+CLAUDE_MODEL = "claude-sonnet-4-20250514"
 LOOKBACK_HOURS = 24
 SKIP_TOKEN = "SKIP"
 
@@ -55,6 +57,31 @@ PROMPT_TEMPLATE = (
     "leasing, or fashion. If this is generic AI hype with no concrete "
     "retail example, respond with 'SKIP'. Title: {title}. Summary: {summary}"
 )
+
+ANALYSIS_PROMPT_TEMPLATE = (
+    "You are an AI analyst for Value Retail, owner of the Bicester "
+    "Collection (luxury outlet shopping villages across Europe). "
+    "Analyse the following AI-related retail/fashion/leasing news "
+    "articles from the last 24 hours.\n"
+    "Provide:\n"
+    "1. THEME CLUSTERS - Group articles by theme. Name each cluster "
+    "by the claim or shift (e.g. 'AI-driven dynamic leasing pricing "
+    "is going mainstream'), not by source. For each cluster: "
+    "one-paragraph synthesis and a 'So What for Value Retail' line "
+    "covering leasing strategy, tenant mix, in-store experience, "
+    "or brand partnerships.\n"
+    "2. WHO TO WATCH - Companies or executives whose AI moves in "
+    "retail/leasing/fashion drove the most discussion.\n"
+    "3. SIGNAL VS NOISE - Flag which items are genuine signal vs "
+    "generic trend pieces.\n"
+    "Articles:\n{articles}"
+)
+
+ANALYSIS_MAX_TOKENS = 2000
+
+# Email configuration
+EMAIL_RECIPIENT = "abanta@valueretail.com"
+NO_NEWS_EMAIL_BODY = "No significant AI retail news found in the last 24 hours."
 
 
 # --------------------------------------------------------------------------
@@ -173,6 +200,131 @@ def call_claude(client, title, summary, retries=2, backoff=2.0):
     return None
 
 
+def format_articles_for_analysis(articles):
+    """
+    Format a list of article dicts (title, summary, source, link) into a
+    numbered plain-text block suitable for insertion into the analysis
+    prompt.
+    """
+    lines = []
+    for i, art in enumerate(articles, start=1):
+        lines.append(
+            f"{i}. Title: {art['title']}\n"
+            f"   Summary: {art['summary']}\n"
+            f"   Source: {art['source']}\n"
+            f"   Link: {art['link']}"
+        )
+    return "\n\n".join(lines)
+
+
+def call_claude_analysis(client, articles, retries=2, backoff=2.0):
+    """
+    Call the Claude API with the full list of today's articles to produce
+    a theme-cluster analysis. Returns the analysis text, or None on
+    repeated failure.
+    """
+    formatted = format_articles_for_analysis(articles)
+    prompt = ANALYSIS_PROMPT_TEMPLATE.format(articles=formatted)
+
+    for attempt in range(1, retries + 2):
+        try:
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=ANALYSIS_MAX_TOKENS,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text_parts = [
+                block.text for block in response.content
+                if getattr(block, "type", None) == "text"
+            ]
+            return "".join(text_parts).strip()
+        except (APIStatusError, APIConnectionError, APIError) as e:
+            print(f"  Claude API error on analysis attempt {attempt}: {e}")
+            if attempt <= retries:
+                time.sleep(backoff * attempt)
+            else:
+                return None
+        except Exception as e:
+            print(f"  Unexpected error calling Claude API for analysis: {e}")
+            return None
+    return None
+
+
+def save_analysis_files(analysis_text, date_str):
+    """
+    Save the analysis text to a dated markdown file and overwrite
+    LATEST_ANALYSIS.md. Returns the dated filename, or None on failure.
+    """
+    dated_filename = f"daily_analysis_{date_str}.md"
+    try:
+        with open(dated_filename, "w", encoding="utf-8") as f:
+            f.write(analysis_text)
+    except Exception as e:
+        print(f"Error: failed to write '{dated_filename}': {e}")
+        dated_filename = None
+
+    try:
+        with open("LATEST_ANALYSIS.md", "w", encoding="utf-8") as f:
+            f.write(analysis_text)
+    except Exception as e:
+        print(f"Error: failed to write 'LATEST_ANALYSIS.md': {e}")
+
+    return dated_filename
+
+
+def send_email(subject, body):
+    """
+    Send a plain-text email using SMTP credentials from environment
+    variables. Returns True on success, False on failure.
+    """
+    smtp_server = os.environ.get("SMTP_SERVER")
+    smtp_port = os.environ.get("SMTP_PORT")
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_password = os.environ.get("SMTP_PASSWORD")
+
+    missing = [
+        name for name, val in [
+            ("SMTP_SERVER", smtp_server),
+            ("SMTP_PORT", smtp_port),
+            ("SMTP_USER", smtp_user),
+            ("SMTP_PASSWORD", smtp_password),
+        ] if not val
+    ]
+    if missing:
+        print(f"Error: missing SMTP environment variable(s): "
+              f"{', '.join(missing)}. Skipping email send.")
+        return False
+
+    try:
+        smtp_port = int(smtp_port)
+    except ValueError:
+        print(f"Error: SMTP_PORT '{smtp_port}' is not a valid integer.")
+        return False
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = smtp_user
+    msg["To"] = EMAIL_RECIPIENT
+
+    try:
+        # Port 465 conventionally means implicit SSL; otherwise use
+        # STARTTLS on the given port (e.g. 587).
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30) as server:
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_user, [EMAIL_RECIPIENT], msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_server, smtp_port, timeout=30) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_user, [EMAIL_RECIPIENT], msg.as_string())
+        print(f"Email sent to {EMAIL_RECIPIENT}.")
+        return True
+    except Exception as e:
+        print(f"Error: failed to send email: {e}")
+        return False
+
+
 # --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
@@ -195,6 +347,7 @@ def main():
     total_added = 0          # actually written to CSV
 
     rows_to_write = []
+    todays_articles = []  # dicts with title, summary, source, link — for analysis stage
 
     for feed_url in RSS_FEEDS:
         print(f"Fetching feed: {feed_url}")
@@ -237,6 +390,12 @@ def main():
 
             date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             rows_to_write.append([date_str, claude_response, link, feed_url])
+            todays_articles.append({
+                "title": title,
+                "summary": summary,
+                "source": feed_url,
+                "link": link,
+            })
             existing_links.add(link)  # prevent intra-run duplicates too
             total_added += 1
 
@@ -255,6 +414,33 @@ def main():
     print(f"Skipped by Claude (generic AI hype): {total_skipped_claude}")
     print(f"Skipped due to errors: {total_errors}")
     print(f"New articles added to {CSV_FILE}: {total_added}")
+
+    # ----------------------------------------------------------------------
+    # Stage 2: theme-cluster analysis + email digest
+    # ----------------------------------------------------------------------
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    email_subject = f"\U0001F916 AI Retail Intel - {today_str}"
+
+    if not todays_articles:
+        print("\nNo new articles today — sending 'no news' email.")
+        send_email(email_subject, NO_NEWS_EMAIL_BODY)
+        return
+
+    print(f"\nRunning theme-cluster analysis on {len(todays_articles)} article(s)...")
+    analysis_text = call_claude_analysis(client, todays_articles)
+
+    if analysis_text is None:
+        print("Error: analysis generation failed after retries. "
+              "Skipping file save and email.")
+        return
+
+    dated_filename = save_analysis_files(analysis_text, today_str)
+    if dated_filename:
+        print(f"Analysis saved to '{dated_filename}' and 'LATEST_ANALYSIS.md'.")
+    else:
+        print("Analysis saved to 'LATEST_ANALYSIS.md' only (dated file failed).")
+
+    send_email(email_subject, analysis_text)
 
 
 if __name__ == "__main__":
