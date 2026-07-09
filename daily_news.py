@@ -103,7 +103,16 @@ ANALYSIS_PROMPT_TEMPLATE = (
     "2. WHO TO WATCH - Companies or executives whose AI moves in "
     "retail/leasing/fashion drove the most discussion.\n"
     "3. SIGNAL VS NOISE - Flag which items are genuine signal vs "
-    "generic trend pieces.\n"
+    "generic trend pieces.\n\n"
+    "Format your response in clean HTML suitable for an email. Use:\n"
+    "- Use <h2> for section titles (THEME CLUSTERS, WHO TO WATCH, SIGNAL VS NOISE)\n"
+    "- Use <h3> for cluster names\n"
+    "- Use <div style='border-left: 4px solid #2563eb; background-color: #eff6ff; "
+    "padding: 12px; margin: 12px 0;'> for 'So What for Value Retail' paragraphs\n"
+    "- Use <strong> for company and person names\n"
+    "- Use <p> tags for paragraphs\n"
+    "- Use clean, professional styling\n"
+    "Do NOT include <html>, <head>, <body>, or <style> tags — just the inner content.\n"
     "Articles:\n{articles}"
 )
 
@@ -117,6 +126,12 @@ EMAIL_RECIPIENTS = [
     "lgriffith@valueretail.com",
 ]
 NO_NEWS_EMAIL_BODY = "No significant AI retail news found in the last 24 hours."
+
+# Branding colors
+COLOR_NAVY = "#1a1a2e"
+COLOR_GOLD = "#c9a84c"
+COLOR_LIGHT_BLUE = "#eff6ff"
+COLOR_BLUE = "#2563eb"
 
 
 # --------------------------------------------------------------------------
@@ -350,8 +365,8 @@ def format_articles_for_analysis(articles):
 def call_claude_analysis(client, articles, retries=2, backoff=2.0):
     """
     Call Claude Sonnet (for strategic quality) with the full list of today's
-    articles to produce a theme-cluster analysis. Returns the analysis text,
-    or None on repeated failure.
+    articles to produce a theme-cluster analysis with HTML formatting.
+    Returns the analysis HTML text, or None on repeated failure.
     """
     formatted = format_articles_for_analysis(articles)
     prompt = ANALYSIS_PROMPT_TEMPLATE.format(articles=formatted)
@@ -409,9 +424,87 @@ def save_analysis_files(analysis_text, date_str):
     return dated_filename
 
 
-def send_email(subject, body):
+def wrap_analysis_in_html_template(analysis_content, date_str):
     """
-    Send a plain-text email using SMTP credentials from environment
+    Wrap the Claude-generated analysis HTML in a professional email template
+    with branding, colors, and responsive design. Returns complete HTML.
+    """
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 20px; background-color: #f0f0f0; font-family: Arial, sans-serif;">
+    <div style="max-width: 680px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        
+        <!-- Header Banner -->
+        <div style="background-color: {COLOR_NAVY}; color: white; padding: 30px 20px; text-align: center;">
+            <h1 style="margin: 0; font-size: 28px; font-weight: bold;">🤖 AI Retail Intel</h1>
+            <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">{date_str}</p>
+        </div>
+        
+        <!-- Main Content -->
+        <div style="padding: 30px 20px; color: #333; line-height: 1.6;">
+            {analysis_content}
+        </div>
+        
+        <!-- Footer -->
+        <div style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666;">
+            <p style="margin: 0;">Automated AI Intelligence Report</p>
+            <p style="margin: 4px 0 0 0;">Value Retail — Bicester Collection</p>
+        </div>
+        
+    </div>
+</body>
+</html>
+"""
+    return html
+
+
+def wrap_no_news_in_html_template(date_str):
+    """
+    Create a professional HTML email for the 'no news' case with branding.
+    """
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 20px; background-color: #f0f0f0; font-family: Arial, sans-serif;">
+    <div style="max-width: 680px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        
+        <!-- Header Banner -->
+        <div style="background-color: {COLOR_NAVY}; color: white; padding: 30px 20px; text-align: center;">
+            <h1 style="margin: 0; font-size: 28px; font-weight: bold;">🤖 AI Retail Intel</h1>
+            <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">{date_str}</p>
+        </div>
+        
+        <!-- Main Content -->
+        <div style="padding: 60px 20px; text-align: center; color: #666;">
+            <p style="font-size: 16px; margin: 0;">No significant AI retail news found in the last 24 hours.</p>
+            <p style="font-size: 14px; margin: 16px 0 0 0; color: #999;">Check back tomorrow for the latest developments.</p>
+        </div>
+        
+        <!-- Footer -->
+        <div style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666;">
+            <p style="margin: 0;">Automated AI Intelligence Report</p>
+            <p style="margin: 4px 0 0 0;">Value Retail — Bicester Collection</p>
+        </div>
+        
+    </div>
+</body>
+</html>
+"""
+    return html
+
+
+def send_email(subject, body, is_html=True):
+    """
+    Send an HTML or plain-text email using SMTP credentials from environment
     variables. Returns True on success, False on failure.
     """
     smtp_server = os.environ.get("SMTP_SERVER")
@@ -438,7 +531,9 @@ def send_email(subject, body):
         print(f"Error: SMTP_PORT '{smtp_port}' is not a valid integer.")
         return False
 
-    msg = MIMEText(body, "plain", "utf-8")
+    # Create email with HTML or plain-text based on is_html flag
+    msg_type = "html" if is_html else "plain"
+    msg = MIMEText(body, msg_type, "utf-8")
     msg["Subject"] = subject
     msg["From"] = smtp_user
     msg["To"] = ", ".join(EMAIL_RECIPIENTS)
@@ -589,7 +684,8 @@ def main():
 
     if not todays_articles:
         print("\nNo new articles today — sending 'no news' email.")
-        send_email(email_subject, NO_NEWS_EMAIL_BODY)
+        no_news_html = wrap_no_news_in_html_template(today_str)
+        send_email(email_subject, no_news_html, is_html=True)
         return
 
     print(f"\nRunning theme-cluster analysis on {len(todays_articles)} article(s)...")
@@ -606,7 +702,9 @@ def main():
     else:
         print("Analysis saved to 'LATEST_ANALYSIS.md' only (dated file failed).")
 
-    send_email(email_subject, analysis_text)
+    # Wrap the analysis HTML in the full email template
+    full_html = wrap_analysis_in_html_template(analysis_text, today_str)
+    send_email(email_subject, full_html, is_html=True)
 
 
 if __name__ == "__main__":
