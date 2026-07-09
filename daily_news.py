@@ -61,39 +61,31 @@ FEED_REQUEST_HEADERS = {
     )
 }
 
-CLAUDE_MODEL = "claude-sonnet-5"
-ANALYSIS_MODEL = "claude-sonnet-5"
+# Cost optimization: use haiku for fast classification tasks, sonnet only for
+# strategic analysis where quality matters.
+HAIKU_MODEL = "claude-3-5-haiku-20241022"
+SONNET_MODEL = "claude-sonnet-4-20250514"
 LOOKBACK_HOURS = 24
 SKIP_TOKEN = "SKIP"
 
+# Filtering prompt: concise, focused on signal vs. noise classification.
 PROMPT_TEMPLATE = (
-    "You are an AI analyst for Value Retail (owner of the Bicester "
-    "Collection). Given this article title and summary, write a "
-    "1-sentence summary focused on what matters for luxury retail, "
-    "leasing, or fashion. If this is generic AI hype with no concrete "
-    "retail example, respond with 'SKIP'. Title: {title}. Summary: {summary}"
+    "Is this concrete retail/fashion/leasing AI news (not generic hype)? "
+    "Respond 'SKIP' if generic, otherwise 1 sentence on retail impact. "
+    "Title: {title}. Summary: {summary}"
 )
 
 # Web search stage: casts a wider net than the fixed RSS feeds by letting
 # Claude search the open web directly for AI-related retail/fashion/leasing
 # news from the last 24 hours.
 WEB_SEARCH_MAX_USES = 6
-WEB_SEARCH_MAX_TOKENS = 2000
+WEB_SEARCH_MAX_TOKENS = 1500
 WEB_SEARCH_PROMPT = (
-    "Search the web for news articles published in the last 24 hours about "
-    "artificial intelligence, machine learning, generative AI, computer "
-    "vision, or ChatGPT as they relate to retail, fashion, or commercial "
-    "leasing. Run several distinct searches to cover different angles "
-    "(e.g. AI in luxury retail, AI-driven leasing/pricing, AI in fashion "
-    "brands, AI in-store technology). "
-    "After searching, respond with ONLY a JSON array (no markdown code "
-    "fences, no commentary before or after) of the genuinely relevant, "
-    "substantive articles you found. Each element must be an object with "
-    "these exact fields: \"title\", \"summary\" (1-2 sentences), \"link\" "
-    "(the article URL), and \"source\" (the publication name). Exclude "
-    "generic AI hype pieces with no concrete retail example, and exclude "
-    "anything not published in roughly the last 24 hours. If you find "
-    "nothing that qualifies, respond with an empty JSON array: []"
+    "Search the web for AI/ML/generative AI news in retail/fashion/leasing "
+    "from the last 24 hours. Run several searches (luxury retail, leasing "
+    "pricing, fashion brands, in-store tech). Return ONLY a JSON array of "
+    "substantive articles (not hype), each with: title, summary (1-2 "
+    "sentences), link, source. If none found, return []"
 )
 
 ANALYSIS_PROMPT_TEMPLATE = (
@@ -119,7 +111,11 @@ ANALYSIS_MAX_TOKENS = 2000
 ANALYSIS_ARCHIVE_DIR = "analysis"
 
 # Email configuration
-EMAIL_RECIPIENTS = ["abanta@valueretail.com", "ofriedman@valueretail.com", "lgriffith@valueretail.com"]
+EMAIL_RECIPIENTS = [
+    "abanta@valueretail.com",
+    "ofriedman@valueretail.com",
+    "lgriffith@valueretail.com",
+]
 NO_NEWS_EMAIL_BODY = "No significant AI retail news found in the last 24 hours."
 
 
@@ -209,17 +205,17 @@ def fetch_feed_entries(feed_url):
 
 def call_claude(client, title, summary, retries=2, backoff=2.0):
     """
-    Call the Claude API to get a retail-focused 1-sentence summary,
-    or 'SKIP'. Returns the stripped text response, or None on repeated
-    failure.
+    Call the Claude API (Haiku for cost efficiency) to classify an article as
+    signal or noise/hype. Returns the stripped text response, or None on
+    repeated failure.
     """
     prompt = PROMPT_TEMPLATE.format(title=title, summary=summary)
 
     for attempt in range(1, retries + 2):
         try:
             response = client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=200,
+                model=HAIKU_MODEL,
+                max_tokens=150,
                 messages=[{"role": "user", "content": prompt}],
             )
             text_parts = [
@@ -241,15 +237,15 @@ def call_claude(client, title, summary, retries=2, backoff=2.0):
 
 def call_claude_web_search(client, retries=2, backoff=2.0):
     """
-    Use Claude's built-in web search tool to find AI-related retail/
-    fashion/leasing news from across the web, beyond the fixed RSS feeds.
-    Returns a list of dicts with keys title/summary/link/source, or an
-    empty list if nothing qualifies or the call fails after retries.
+    Use Claude (Haiku for cost efficiency) with the web search tool to find
+    AI-related retail/fashion/leasing news from across the web. Returns a
+    list of dicts with keys title/summary/link/source, or an empty list if
+    nothing qualifies or the call fails after retries.
     """
     for attempt in range(1, retries + 2):
         try:
             response = client.messages.create(
-                model=CLAUDE_MODEL,
+                model=HAIKU_MODEL,
                 max_tokens=WEB_SEARCH_MAX_TOKENS,
                 tools=[{
                     "type": "web_search_20250305",
@@ -310,8 +306,8 @@ def process_candidate_article(client, title, summary, link, source, existing_lin
     """
     Shared pipeline for a single candidate article, regardless of whether
     it came from an RSS feed or the web search stage: checks for a
-    duplicate link, then calls Claude for a retail-focused summary and
-    applies the SKIP filter.
+    duplicate link, then calls Claude (Haiku) for a retail-focused summary
+    and applies the SKIP filter.
 
     Returns a tuple (status, row, article) where status is one of
     'duplicate', 'error', 'skipped_hype', or 'added'. row and article are
@@ -353,9 +349,9 @@ def format_articles_for_analysis(articles):
 
 def call_claude_analysis(client, articles, retries=2, backoff=2.0):
     """
-    Call the Claude API with the full list of today's articles to produce
-    a theme-cluster analysis. Returns the analysis text, or None on
-    repeated failure.
+    Call Claude Sonnet (for strategic quality) with the full list of today's
+    articles to produce a theme-cluster analysis. Returns the analysis text,
+    or None on repeated failure.
     """
     formatted = format_articles_for_analysis(articles)
     prompt = ANALYSIS_PROMPT_TEMPLATE.format(articles=formatted)
@@ -363,7 +359,7 @@ def call_claude_analysis(client, articles, retries=2, backoff=2.0):
     for attempt in range(1, retries + 2):
         try:
             response = client.messages.create(
-                model=ANALYSIS_MODEL,
+                model=SONNET_MODEL,
                 max_tokens=ANALYSIS_MAX_TOKENS,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -459,7 +455,7 @@ def send_email(subject, body):
                 server.starttls()
                 server.login(smtp_user, smtp_password)
                 server.sendmail(smtp_user, EMAIL_RECIPIENTS, msg.as_string())
-        print(f"Email sent to {EMAIL_RECIPIENTS}.")
+        print(f"Email sent to {', '.join(EMAIL_RECIPIENTS)}.")
         return True
     except Exception as e:
         print(f"Error: failed to send email: {e}")
