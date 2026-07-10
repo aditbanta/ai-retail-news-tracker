@@ -120,7 +120,8 @@ ANALYSIS_ARCHIVE_DIR = "analysis"
 # Email configuration
 EMAIL_RECIPIENTS = [
     "abanta@valueretail.com",
-    "ofriedman@valueretail.com"
+    "ofriedman@valueretail.com",
+    "lgriffith@valueretail.com",
 ]
 NO_NEWS_EMAIL_BODY = "No significant AI retail news found in the last 24 hours."
 
@@ -135,7 +136,41 @@ COLOR_BLUE = "#2563eb"
 # Helpers
 # --------------------------------------------------------------------------
 
-def load_existing_links(csv_path):
+def clean_csv_skip_rows(csv_path):
+    """
+    Remove any rows where the Article Summary starts with 'SKIP' —
+    these were written erroneously during broken model runs and should
+    never appear in the log. Rewrites the file in place.
+    Returns the number of bad rows removed.
+    """
+    if not os.path.isfile(csv_path):
+        return 0
+    try:
+        with open(csv_path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            rows = list(reader)
+
+        clean_rows = [
+            r for r in rows
+            if not r.get("Article Summary", "").strip().upper().startswith("SKIP")
+        ]
+        removed = len(rows) - len(clean_rows)
+
+        if removed > 0:
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(clean_rows)
+            print(f"Cleaned CSV: removed {removed} erroneous SKIP row(s).")
+
+        return removed
+    except Exception as e:
+        print(f"Warning: could not clean CSV ({e}).")
+        return 0
+
+
+
     """Return a set of links already present in the CSV log (if any)."""
     existing_links = set()
     if os.path.isfile(csv_path):
@@ -333,7 +368,7 @@ def process_candidate_article(client, title, summary, link, source, existing_lin
     if claude_response is None:
         return ("error", None, None)
 
-    if claude_response.strip().upper() == SKIP_TOKEN:
+    if SKIP_TOKEN in claude_response.strip().upper():
         return ("skipped_hype", None, None)
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -567,6 +602,7 @@ def main():
     client = Anthropic(api_key=api_key)
 
     ensure_csv_has_headers(CSV_FILE)
+    clean_csv_skip_rows(CSV_FILE)
     existing_links = load_existing_links(CSV_FILE)
 
     total_found = 0          # matched keyword + within 24h
