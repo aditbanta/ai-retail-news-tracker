@@ -63,8 +63,8 @@ FEED_REQUEST_HEADERS = {
 
 # Cost optimization: use haiku for fast classification tasks, sonnet only for
 # strategic analysis where quality matters.
-HAIKU_MODEL = "claude-haiku-4-5"
-SONNET_MODEL = "claude-sonnet-4-5"
+HAIKU_MODEL = "claude-3-5-haiku"
+SONNET_MODEL = "claude-sonnet-5"
 LOOKBACK_HOURS = 24
 SKIP_TOKEN = "SKIP"
 
@@ -101,11 +101,9 @@ ANALYSIS_PROMPT_TEMPLATE = (
     "covering leasing strategy, tenant mix, in-store experience, "
     "or brand partnerships.\n"
     "2. WHO TO WATCH - Companies or executives whose AI moves in "
-    "retail/leasing/fashion drove the most discussion.\n"
-    "3. SIGNAL VS NOISE - Flag which items are genuine signal vs "
-    "generic trend pieces.\n\n"
+    "retail/leasing/fashion drove the most discussion.\n\n"
     "Format your response in clean HTML suitable for an email. Use:\n"
-    "- Use <h2> for section titles (THEME CLUSTERS, WHO TO WATCH, SIGNAL VS NOISE)\n"
+    "- Use <h2> for section titles (THEME CLUSTERS, WHO TO WATCH)\n"
     "- Use <h3> for cluster names\n"
     "- Use <div style='border-left: 4px solid #2563eb; background-color: #eff6ff; "
     "padding: 12px; margin: 12px 0;'> for 'So What for Value Retail' paragraphs\n"
