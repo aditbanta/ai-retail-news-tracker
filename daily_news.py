@@ -120,8 +120,7 @@ ANALYSIS_ARCHIVE_DIR = "analysis"
 # Email configuration
 EMAIL_RECIPIENTS = [
     "abanta@valueretail.com",
-    "ofriedman@valueretail.com",
-    "lgriffith@valueretail.com",
+    "ofriedman@valueretail.com"
 ]
 NO_NEWS_EMAIL_BODY = "No significant AI retail news found in the last 24 hours."
 
