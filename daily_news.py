@@ -63,7 +63,7 @@ FEED_REQUEST_HEADERS = {
 
 # Cost optimization: use haiku for fast classification tasks, sonnet only for
 # strategic analysis where quality matters.
-HAIKU_MODEL = "claude-3-5-haiku"
+HAIKU_MODEL = "claude-haiku-4-5"
 SONNET_MODEL = "claude-sonnet-5"
 LOOKBACK_HOURS = 24
 SKIP_TOKEN = "SKIP"
