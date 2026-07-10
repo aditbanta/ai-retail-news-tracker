@@ -102,15 +102,16 @@ ANALYSIS_PROMPT_TEMPLATE = (
     "or brand partnerships.\n"
     "2. WHO TO WATCH - Companies or executives whose AI moves in "
     "retail/leasing/fashion drove the most discussion.\n\n"
-    "Format your response in clean HTML suitable for an email. Use:\n"
-    "- Use <h2> for section titles (THEME CLUSTERS, WHO TO WATCH)\n"
-    "- Use <h3> for cluster names\n"
-    "- Use <div style='border-left: 4px solid #2563eb; background-color: #eff6ff; "
-    "padding: 12px; margin: 12px 0;'> for 'So What for Value Retail' paragraphs\n"
-    "- Use <strong> for company and person names\n"
-    "- Use <p> tags for paragraphs\n"
-    "- Use clean, professional styling\n"
-    "Do NOT include <html>, <head>, <body>, or <style> tags — just the inner content.\n"
+    "Format your response in clean HTML. Use these exact elements:\n"
+    "- <h3> for each cluster name (sentence case)\n"
+    "- <p> for the synthesis paragraph\n"
+    "- <div class='so-what'><span class='so-what-label'>So what for Value Retail</span> followed by the insight text</div> for each So What callout\n"
+    "- For the WHO TO WATCH section, use <div class='watch-grid'> containing individual <div class='watch-card'><strong>Company name</strong><span>one-line description</span></div> entries\n"
+    "- Use <p> tags for all body text\n"
+    "Do NOT include <html>, <head>, <body>, <style>, or any section title tags "
+    "for THEME CLUSTERS or WHO TO WATCH — the template handles those.\n"
+    "Separate the theme clusters section from the who to watch section with "
+    "exactly this marker on its own line: |||WHO_TO_WATCH|||\n"
     "Articles:\n{articles}"
 )
 
@@ -124,11 +125,13 @@ EMAIL_RECIPIENTS = [
 ]
 NO_NEWS_EMAIL_BODY = "No significant AI retail news found in the last 24 hours."
 
-# Branding colors
-COLOR_NAVY = "#1a1a2e"
-COLOR_GOLD = "#c9a84c"
-COLOR_LIGHT_BLUE = "#eff6ff"
-COLOR_BLUE = "#2563eb"
+# Bicester Collection brand colours
+COLOR_NATURAL_GREEN = "#7E8A4A"
+COLOR_SANDSTONE = "#F5F0E6"
+COLOR_RADIANT_GREEN = "#BAF763"
+COLOR_RACING_GREEN = "#233B2B"
+COLOR_SANDSTONE_CARD = "#fafaf7"
+COLOR_BORDER = "#e8e4da"
 
 
 # --------------------------------------------------------------------------
@@ -169,7 +172,7 @@ def clean_csv_skip_rows(csv_path):
         return 0
 
 
-
+def load_existing_links(csv_path):
     """Return a set of links already present in the CSV log (if any)."""
     existing_links = set()
     if os.path.isfile(csv_path):
@@ -215,8 +218,6 @@ def get_entry_datetime(entry):
 
 def is_within_lookback(entry_dt, hours=LOOKBACK_HOURS):
     if entry_dt is None:
-        # If we can't determine a date, don't silently include it —
-        # skip it to avoid processing stale/undated articles repeatedly.
         return False
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     return entry_dt >= cutoff
@@ -251,9 +252,8 @@ def fetch_feed_entries(feed_url):
 
 def call_claude(client, title, summary, retries=2, backoff=2.0):
     """
-    Call the Claude API (Haiku for cost efficiency) to classify an article as
-    signal or noise/hype. Returns the stripped text response, or None on
-    repeated failure.
+    Call Claude Haiku to classify an article as signal or noise/hype.
+    Returns the stripped text response, or None on repeated failure.
     """
     prompt = PROMPT_TEMPLATE.format(title=title, summary=summary)
 
@@ -283,10 +283,9 @@ def call_claude(client, title, summary, retries=2, backoff=2.0):
 
 def call_claude_web_search(client, retries=2, backoff=2.0):
     """
-    Use Claude (Haiku for cost efficiency) with the web search tool to find
-    AI-related retail/fashion/leasing news from across the web. Returns a
-    list of dicts with keys title/summary/link/source, or an empty list if
-    nothing qualifies or the call fails after retries.
+    Use Claude Haiku with the web search tool to find AI-related
+    retail/fashion/leasing news from across the web. Returns a list of
+    dicts with keys title/summary/link/source, or an empty list on failure.
     """
     for attempt in range(1, retries + 2):
         try:
@@ -300,17 +299,12 @@ def call_claude_web_search(client, retries=2, backoff=2.0):
                 }],
                 messages=[{"role": "user", "content": WEB_SEARCH_PROMPT}],
             )
-            # Only the final text blocks contain Claude's answer; search
-            # activity shows up as separate server_tool_use /
-            # web_search_tool_result blocks, which we ignore here.
             text_parts = [
                 block.text for block in response.content
                 if getattr(block, "type", None) == "text"
             ]
             raw_text = "".join(text_parts).strip()
 
-            # Defensively strip markdown code fences in case Claude adds
-            # them despite instructions not to.
             cleaned = raw_text
             if cleaned.startswith("```"):
                 cleaned = cleaned.strip("`")
@@ -329,12 +323,10 @@ def call_claude_web_search(client, retries=2, backoff=2.0):
                 print("  Warning: web search response JSON was not a list. Ignoring.")
                 return []
 
-            # Keep only well-formed entries with the fields we need.
-            valid_articles = [
+            return [
                 a for a in articles
                 if isinstance(a, dict) and a.get("title") and a.get("link")
             ]
-            return valid_articles
 
         except (APIStatusError, APIConnectionError, APIError) as e:
             print(f"  Claude API error on web search attempt {attempt}: {e}")
@@ -350,14 +342,12 @@ def call_claude_web_search(client, retries=2, backoff=2.0):
 
 def process_candidate_article(client, title, summary, link, source, existing_links):
     """
-    Shared pipeline for a single candidate article, regardless of whether
-    it came from an RSS feed or the web search stage: checks for a
-    duplicate link, then calls Claude (Haiku) for a retail-focused summary
-    and applies the SKIP filter.
+    Shared pipeline for a single candidate article: checks for a duplicate
+    link, calls Claude Haiku for a retail-focused summary, and applies the
+    SKIP filter.
 
     Returns a tuple (status, row, article) where status is one of
-    'duplicate', 'error', 'skipped_hype', or 'added'. row and article are
-    only populated when status == 'added'.
+    'duplicate', 'error', 'skipped_hype', or 'added'.
     """
     if link in existing_links:
         return ("duplicate", None, None)
@@ -378,9 +368,8 @@ def process_candidate_article(client, title, summary, link, source, existing_lin
 
 def format_articles_for_analysis(articles):
     """
-    Format a list of article dicts (title, summary, source, link) into a
-    numbered plain-text block suitable for insertion into the analysis
-    prompt.
+    Format a list of article dicts into a numbered plain-text block
+    suitable for insertion into the analysis prompt.
     """
     lines = []
     for i, art in enumerate(articles, start=1):
@@ -395,9 +384,9 @@ def format_articles_for_analysis(articles):
 
 def call_claude_analysis(client, articles, retries=2, backoff=2.0):
     """
-    Call Claude Sonnet (for strategic quality) with the full list of today's
-    articles to produce a theme-cluster analysis with HTML formatting.
-    Returns the analysis HTML text, or None on repeated failure.
+    Call Claude Sonnet with the full list of today's articles to produce
+    a theme-cluster analysis with structured HTML output.
+    Returns the analysis text, or None on repeated failure.
     """
     formatted = format_articles_for_analysis(articles)
     prompt = ANALYSIS_PROMPT_TEMPLATE.format(articles=formatted)
@@ -429,8 +418,8 @@ def call_claude_analysis(client, articles, retries=2, backoff=2.0):
 def save_analysis_files(analysis_text, date_str):
     """
     Save the analysis text to a dated markdown file under ANALYSIS_ARCHIVE_DIR/
-    and overwrite LATEST_ANALYSIS.md at the repo root. Returns the dated
-    filename (including its subfolder path), or None on failure.
+    and overwrite LATEST_ANALYSIS.md at the repo root.
+    Returns the dated filename, or None on failure.
     """
     try:
         os.makedirs(ANALYSIS_ARCHIVE_DIR, exist_ok=True)
@@ -455,88 +444,210 @@ def save_analysis_files(analysis_text, date_str):
     return dated_filename
 
 
-def wrap_analysis_in_html_template(analysis_content, date_str):
+def build_inline_styles():
+    """Return a dict of reusable inline style strings for the email template."""
+    return {
+        "so_what_div": (
+            f"border-left:3px solid {COLOR_NATURAL_GREEN}; "
+            f"background:{COLOR_SANDSTONE}; "
+            f"padding:16px 20px; margin-top:4px; margin-bottom:0;"
+        ),
+        "so_what_label": (
+            f"display:block; font-size:10px; font-weight:400; "
+            f"color:{COLOR_NATURAL_GREEN}; text-transform:uppercase; "
+            f"letter-spacing:2px; margin-bottom:8px; font-family:Arial,sans-serif;"
+        ),
+        "so_what_text": (
+            "margin:0; font-size:13px; line-height:1.7; color:#333; "
+            "font-family:Arial,sans-serif; font-weight:300;"
+        ),
+        "watch_grid": (
+            "display:grid; grid-template-columns:1fr 1fr; gap:12px;"
+        ),
+        "watch_card": (
+            f"border:1px solid {COLOR_BORDER}; padding:16px 18px; "
+            f"background:{COLOR_SANDSTONE_CARD};"
+        ),
+        "watch_name": (
+            f"display:block; font-size:14px; font-weight:400; "
+            f"color:{COLOR_RACING_GREEN}; margin-bottom:6px; "
+            f"font-family:Georgia,serif;"
+        ),
+        "watch_desc": (
+            "display:block; font-size:13px; color:#666; line-height:1.6; "
+            "font-family:Arial,sans-serif; font-weight:300;"
+        ),
+    }
+
+
+def wrap_analysis_in_html_template(analysis_text, date_str):
     """
-    Wrap the Claude-generated analysis HTML in a professional email template
-    with branding, colors, and responsive design. Returns complete HTML.
+    Split Claude's output on the |||WHO_TO_WATCH||| marker, apply inline
+    CSS transformations for branded callouts and watch cards, then wrap
+    everything in the Bicester Collection email shell.
     """
-    html = f"""
-<!DOCTYPE html>
+    styles = build_inline_styles()
+
+    # Split on the section marker Claude was asked to include
+    parts = analysis_text.split("|||WHO_TO_WATCH|||", 1)
+    clusters_html = parts[0].strip() if parts else analysis_text.strip()
+    who_html = parts[1].strip() if len(parts) > 1 else ""
+
+    # Replace Claude's class-based so-what divs with fully inline versions
+    clusters_html = clusters_html.replace(
+        "<div class='so-what'>",
+        f"<div style='{styles['so_what_div']}'>"
+    ).replace(
+        '<div class="so-what">',
+        f"<div style='{styles['so_what_div']}'>"
+    ).replace(
+        "<span class='so-what-label'>",
+        f"<span style='{styles['so_what_label']}'>"
+    ).replace(
+        '<span class="so-what-label">',
+        f"<span style='{styles['so_what_label']}'>"
+    )
+
+    # Replace watch grid and card classes with inline styles
+    who_html = who_html.replace(
+        "<div class='watch-grid'>",
+        f"<div style='{styles['watch_grid']}'>"
+    ).replace(
+        '<div class="watch-grid">',
+        f"<div style='{styles['watch_grid']}'>"
+    ).replace(
+        "<div class='watch-card'>",
+        f"<div style='{styles['watch_card']}'>"
+    ).replace(
+        '<div class="watch-card">',
+        f"<div style='{styles['watch_card']}'>"
+    ).replace(
+        "<strong>",
+        f"<strong style='{styles['watch_name']}'>"
+    ).replace(
+        "<span>",
+        f"<span style='{styles['watch_desc']}'>"
+    )
+
+    # Style h3 cluster headings
+    clusters_html = clusters_html.replace(
+        "<h3>",
+        f"<h3 style='margin:0 0 10px 0; font-size:17px; font-weight:400; "
+        f"color:{COLOR_RACING_GREEN}; font-family:Georgia,serif; letter-spacing:-0.3px;'>"
+    )
+
+    # Style body paragraphs
+    clusters_html = clusters_html.replace(
+        "<p>",
+        "<p style='margin:0 0 14px 0; font-size:14px; line-height:1.75; "
+        "color:#444; font-family:Arial,sans-serif; font-weight:300;'>"
+    )
+    who_html = who_html.replace(
+        "<p>",
+        "<p style='margin:0 0 14px 0; font-size:14px; line-height:1.75; "
+        "color:#444; font-family:Arial,sans-serif; font-weight:300;'>"
+    )
+
+    html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin: 0; padding: 20px; background-color: #f0f0f0; font-family: Arial, sans-serif;">
-    <div style="max-width: 680px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-        
-        <!-- Header Banner -->
-        <div style="background-color: {COLOR_NAVY}; color: white; padding: 30px 20px; text-align: center;">
-            <h1 style="margin: 0; font-size: 28px; font-weight: bold;">🤖 AI Retail Intel</h1>
-            <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">{date_str}</p>
-        </div>
-        
-        <!-- Main Content -->
-        <div style="padding: 30px 20px; color: #333; line-height: 1.6;">
-            {analysis_content}
-        </div>
-        
-        <!-- Footer -->
-        <div style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666;">
-            <p style="margin: 0;">Automated AI Intelligence Report</p>
-            <p style="margin: 4px 0 0 0;">Value Retail — Bicester Collection</p>
-        </div>
-        
+<body style="margin:0; padding:20px; background-color:{COLOR_SANDSTONE}; font-family:Arial,sans-serif;">
+<div style="max-width:680px; margin:0 auto; background:#ffffff; overflow:hidden;">
+
+    <!-- Header -->
+    <div style="background:{COLOR_NATURAL_GREEN}; padding:40px 40px 32px; text-align:center;">
+        <div style="font-size:11px; letter-spacing:3px; text-transform:uppercase; color:rgba(255,255,255,0.65); margin-bottom:14px; font-family:Arial,sans-serif;">The Bicester Collection</div>
+        <h1 style="margin:0; font-size:30px; font-weight:400; color:#ffffff; font-family:Georgia,serif; letter-spacing:-0.5px;">AI Retail Intel</h1>
+        <div style="margin-top:12px; font-size:12px; color:rgba(255,255,255,0.6); font-family:Arial,sans-serif; letter-spacing:1px;">{date_str}</div>
     </div>
+
+    <!-- Radiant Green accent bar -->
+    <div style="height:4px; background:{COLOR_RADIANT_GREEN};"></div>
+
+    <!-- Main content -->
+    <div style="padding:36px 40px; background:#ffffff;">
+
+        <!-- Theme Clusters section -->
+        <div style="margin-bottom:36px;">
+            <div style="margin-bottom:24px; padding-bottom:12px; border-bottom:1px solid {COLOR_BORDER};">
+                <h2 style="margin:0; font-size:11px; font-weight:400; color:{COLOR_NATURAL_GREEN}; text-transform:uppercase; letter-spacing:3px; font-family:Arial,sans-serif;">Theme clusters</h2>
+            </div>
+            {clusters_html}
+        </div>
+
+        <!-- Divider -->
+        <div style="height:1px; background:{COLOR_BORDER}; margin-bottom:36px;"></div>
+
+        <!-- Who to Watch section -->
+        <div>
+            <div style="margin-bottom:24px; padding-bottom:12px; border-bottom:1px solid {COLOR_BORDER};">
+                <h2 style="margin:0; font-size:11px; font-weight:400; color:{COLOR_NATURAL_GREEN}; text-transform:uppercase; letter-spacing:3px; font-family:Arial,sans-serif;">Who to watch</h2>
+            </div>
+            {who_html}
+        </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div style="background:{COLOR_RACING_GREEN}; padding:24px 40px; text-align:center;">
+        <div style="font-size:10px; color:rgba(255,255,255,0.5); letter-spacing:2px; text-transform:uppercase; font-family:Arial,sans-serif;">Automated AI Intelligence Report</div>
+        <div style="font-size:11px; color:rgba(255,255,255,0.7); margin-top:6px; font-family:Arial,sans-serif;">Value Retail — Bicester Collection</div>
+    </div>
+
+</div>
 </body>
-</html>
-"""
+</html>"""
     return html
 
 
 def wrap_no_news_in_html_template(date_str):
     """
-    Create a professional HTML email for the 'no news' case with branding.
+    Create a branded HTML email for the 'no news' case.
     """
-    html = f"""
-<!DOCTYPE html>
+    html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin: 0; padding: 20px; background-color: #f0f0f0; font-family: Arial, sans-serif;">
-    <div style="max-width: 680px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-        
-        <!-- Header Banner -->
-        <div style="background-color: {COLOR_NAVY}; color: white; padding: 30px 20px; text-align: center;">
-            <h1 style="margin: 0; font-size: 28px; font-weight: bold;">🤖 AI Retail Intel</h1>
-            <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">{date_str}</p>
-        </div>
-        
-        <!-- Main Content -->
-        <div style="padding: 60px 20px; text-align: center; color: #666;">
-            <p style="font-size: 16px; margin: 0;">No significant AI retail news found in the last 24 hours.</p>
-            <p style="font-size: 14px; margin: 16px 0 0 0; color: #999;">Check back tomorrow for the latest developments.</p>
-        </div>
-        
-        <!-- Footer -->
-        <div style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666;">
-            <p style="margin: 0;">Automated AI Intelligence Report</p>
-            <p style="margin: 4px 0 0 0;">Value Retail — Bicester Collection</p>
-        </div>
-        
+<body style="margin:0; padding:20px; background-color:{COLOR_SANDSTONE}; font-family:Arial,sans-serif;">
+<div style="max-width:680px; margin:0 auto; background:#ffffff; overflow:hidden;">
+
+    <!-- Header -->
+    <div style="background:{COLOR_NATURAL_GREEN}; padding:40px 40px 32px; text-align:center;">
+        <div style="font-size:11px; letter-spacing:3px; text-transform:uppercase; color:rgba(255,255,255,0.65); margin-bottom:14px; font-family:Arial,sans-serif;">The Bicester Collection</div>
+        <h1 style="margin:0; font-size:30px; font-weight:400; color:#ffffff; font-family:Georgia,serif; letter-spacing:-0.5px;">AI Retail Intel</h1>
+        <div style="margin-top:12px; font-size:12px; color:rgba(255,255,255,0.6); font-family:Arial,sans-serif; letter-spacing:1px;">{date_str}</div>
     </div>
+
+    <!-- Radiant Green accent bar -->
+    <div style="height:4px; background:{COLOR_RADIANT_GREEN};"></div>
+
+    <!-- Message -->
+    <div style="padding:60px 40px; text-align:center;">
+        <p style="font-size:15px; color:#666; font-family:Georgia,serif; font-weight:400; margin:0;">No significant AI retail news found in the last 24 hours.</p>
+        <p style="font-size:13px; color:#999; font-family:Arial,sans-serif; font-weight:300; margin:16px 0 0 0;">Check back tomorrow for the latest developments.</p>
+    </div>
+
+    <!-- Footer -->
+    <div style="background:{COLOR_RACING_GREEN}; padding:24px 40px; text-align:center;">
+        <div style="font-size:10px; color:rgba(255,255,255,0.5); letter-spacing:2px; text-transform:uppercase; font-family:Arial,sans-serif;">Automated AI Intelligence Report</div>
+        <div style="font-size:11px; color:rgba(255,255,255,0.7); margin-top:6px; font-family:Arial,sans-serif;">Value Retail — Bicester Collection</div>
+    </div>
+
+</div>
 </body>
-</html>
-"""
+</html>"""
     return html
 
 
 def send_email(subject, body, is_html=True):
     """
-    Send an HTML or plain-text email using SMTP credentials from environment
-    variables. Returns True on success, False on failure.
+    Send an HTML email using SMTP credentials from environment variables.
+    Returns True on success, False on failure.
     """
     smtp_server = os.environ.get("SMTP_SERVER")
     smtp_port = os.environ.get("SMTP_PORT")
@@ -562,7 +673,6 @@ def send_email(subject, body, is_html=True):
         print(f"Error: SMTP_PORT '{smtp_port}' is not a valid integer.")
         return False
 
-    # Create email with HTML or plain-text based on is_html flag
     msg_type = "html" if is_html else "plain"
     msg = MIMEText(body, msg_type, "utf-8")
     msg["Subject"] = subject
@@ -570,8 +680,6 @@ def send_email(subject, body, is_html=True):
     msg["To"] = ", ".join(EMAIL_RECIPIENTS)
 
     try:
-        # Port 465 conventionally means implicit SSL; otherwise use
-        # STARTTLS on the given port (e.g. 587).
         if smtp_port == 465:
             with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30) as server:
                 server.login(smtp_user, smtp_password)
@@ -604,14 +712,14 @@ def main():
     clean_csv_skip_rows(CSV_FILE)
     existing_links = load_existing_links(CSV_FILE)
 
-    total_found = 0          # matched keyword + within 24h
-    total_skipped_dupe = 0   # already in CSV
-    total_skipped_claude = 0 # Claude said SKIP
-    total_errors = 0         # API/parse errors
-    total_added = 0          # actually written to CSV
+    total_found = 0
+    total_skipped_dupe = 0
+    total_skipped_claude = 0
+    total_errors = 0
+    total_added = 0
 
     rows_to_write = []
-    todays_articles = []  # dicts with title, summary, source, link — for analysis stage
+    todays_articles = []
 
     for feed_url in RSS_FEEDS:
         print(f"Fetching feed: {feed_url}")
@@ -651,12 +759,11 @@ def main():
             elif status == "added":
                 rows_to_write.append(row)
                 todays_articles.append(article)
-                existing_links.add(link)  # prevent intra-run duplicates too
+                existing_links.add(link)
                 total_added += 1
 
     # ------------------------------------------------------------------
-    # Web search stage: broaden coverage beyond the fixed RSS feeds by
-    # letting Claude search the open web directly for AI retail news.
+    # Web search stage
     # ------------------------------------------------------------------
     print("\nRunning supplemental web search for AI retail news...")
     web_articles = call_claude_web_search(client)
@@ -689,7 +796,7 @@ def main():
         elif status == "added":
             rows_to_write.append(row)
             todays_articles.append(article)
-            existing_links.add(link)  # prevent intra-run duplicates too
+            existing_links.add(link)
             total_added += 1
 
     if rows_to_write:
@@ -703,21 +810,20 @@ def main():
 
     print("\n--- Summary ---")
     print(f"Articles matching keywords in last {LOOKBACK_HOURS}h: {total_found}")
-    print(f"Skipped as duplicates (already logged): {total_skipped_dupe}")
-    print(f"Skipped by Claude (generic AI hype): {total_skipped_claude}")
-    print(f"Skipped due to errors: {total_errors}")
-    print(f"New articles added to {CSV_FILE}: {total_added}")
+    print(f"Skipped as duplicates (already logged):               {total_skipped_dupe}")
+    print(f"Skipped by Claude (generic AI hype):                  {total_skipped_claude}")
+    print(f"Skipped due to errors:                                {total_errors}")
+    print(f"New articles added to {CSV_FILE}:          {total_added}")
 
-    # ----------------------------------------------------------------------
-    # Stage 2: theme-cluster analysis + email digest
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Stage 2: analysis + branded email
+    # ------------------------------------------------------------------
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    email_subject = f"\U0001F916 AI Retail Intel - {today_str}"
+    email_subject = f"AI Retail Intel - {today_str}"
 
     if not todays_articles:
         print("\nNo new articles today — sending 'no news' email.")
-        no_news_html = wrap_no_news_in_html_template(today_str)
-        send_email(email_subject, no_news_html, is_html=True)
+        send_email(email_subject, wrap_no_news_in_html_template(today_str), is_html=True)
         return
 
     print(f"\nRunning theme-cluster analysis on {len(todays_articles)} article(s)...")
@@ -734,7 +840,6 @@ def main():
     else:
         print("Analysis saved to 'LATEST_ANALYSIS.md' only (dated file failed).")
 
-    # Wrap the analysis HTML in the full email template
     full_html = wrap_analysis_in_html_template(analysis_text, today_str)
     send_email(email_subject, full_html, is_html=True)
 
