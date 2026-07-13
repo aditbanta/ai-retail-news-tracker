@@ -450,31 +450,31 @@ def build_inline_styles():
         "so_what_div": (
             f"border-left:3px solid {COLOR_NATURAL_GREEN}; "
             f"background:{COLOR_SANDSTONE}; "
-            f"padding:16px 20px; margin-top:4px; margin-bottom:0;"
+            f"padding:20px 24px; margin-top:16px; margin-bottom:32px;"
         ),
         "so_what_label": (
             f"display:block; font-size:10px; font-weight:400; "
             f"color:{COLOR_NATURAL_GREEN}; text-transform:uppercase; "
-            f"letter-spacing:2px; margin-bottom:8px; font-family:Arial,sans-serif;"
+            f"letter-spacing:2px; margin-bottom:12px; font-family:Arial,sans-serif;"
         ),
         "so_what_text": (
-            "margin:0; font-size:13px; line-height:1.7; color:#333; "
+            "margin:0; font-size:13px; line-height:1.8; color:#333; "
             "font-family:Arial,sans-serif; font-weight:300;"
         ),
         "watch_grid": (
-            "display:grid; grid-template-columns:1fr 1fr; gap:12px;"
+            "display:grid; grid-template-columns:1fr 1fr; gap:16px;"
         ),
         "watch_card": (
-            f"border:1px solid {COLOR_BORDER}; padding:16px 18px; "
+            f"border:1px solid {COLOR_BORDER}; padding:20px 22px; "
             f"background:{COLOR_SANDSTONE_CARD};"
         ),
         "watch_name": (
             f"display:block; font-size:14px; font-weight:400; "
-            f"color:{COLOR_RACING_GREEN}; margin-bottom:6px; "
+            f"color:{COLOR_RACING_GREEN}; margin-bottom:8px; "
             f"font-family:Georgia,serif;"
         ),
         "watch_desc": (
-            "display:block; font-size:13px; color:#666; line-height:1.6; "
+            "display:block; font-size:13px; color:#666; line-height:1.7; "
             "font-family:Arial,sans-serif; font-weight:300;"
         ),
     }
@@ -532,19 +532,19 @@ def wrap_analysis_in_html_template(analysis_text, date_str):
     # Style h3 cluster headings
     clusters_html = clusters_html.replace(
         "<h3>",
-        f"<h3 style='margin:0 0 10px 0; font-size:17px; font-weight:400; "
+        f"<h3 style='margin:32px 0 12px 0; font-size:17px; font-weight:400; "
         f"color:{COLOR_RACING_GREEN}; font-family:Georgia,serif; letter-spacing:-0.3px;'>"
     )
 
     # Style body paragraphs
     clusters_html = clusters_html.replace(
         "<p>",
-        "<p style='margin:0 0 14px 0; font-size:14px; line-height:1.75; "
+        "<p style='margin:0 0 18px 0; font-size:14px; line-height:1.8; "
         "color:#444; font-family:Arial,sans-serif; font-weight:300;'>"
     )
     who_html = who_html.replace(
         "<p>",
-        "<p style='margin:0 0 14px 0; font-size:14px; line-height:1.75; "
+        "<p style='margin:0 0 18px 0; font-size:14px; line-height:1.8; "
         "color:#444; font-family:Arial,sans-serif; font-weight:300;'>"
     )
 
@@ -568,22 +568,22 @@ def wrap_analysis_in_html_template(analysis_text, date_str):
     <div style="height:4px; background:{COLOR_RADIANT_GREEN};"></div>
 
     <!-- Main content -->
-    <div style="padding:36px 40px; background:#ffffff;">
+    <div style="padding:44px 48px; background:#ffffff;">
 
         <!-- Theme Clusters section -->
-        <div style="margin-bottom:36px;">
-            <div style="margin-bottom:24px; padding-bottom:12px; border-bottom:1px solid {COLOR_BORDER};">
+        <div style="margin-bottom:44px;">
+            <div style="margin-bottom:28px; padding-bottom:14px; border-bottom:1px solid {COLOR_BORDER};">
                 <h2 style="margin:0; font-size:11px; font-weight:400; color:{COLOR_NATURAL_GREEN}; text-transform:uppercase; letter-spacing:3px; font-family:Arial,sans-serif;">Theme clusters</h2>
             </div>
             {clusters_html}
         </div>
 
         <!-- Divider -->
-        <div style="height:1px; background:{COLOR_BORDER}; margin-bottom:36px;"></div>
+        <div style="height:1px; background:{COLOR_BORDER}; margin-bottom:44px;"></div>
 
         <!-- Who to Watch section -->
         <div>
-            <div style="margin-bottom:24px; padding-bottom:12px; border-bottom:1px solid {COLOR_BORDER};">
+            <div style="margin-bottom:28px; padding-bottom:14px; border-bottom:1px solid {COLOR_BORDER};">
                 <h2 style="margin:0; font-size:11px; font-weight:400; color:{COLOR_NATURAL_GREEN}; text-transform:uppercase; letter-spacing:3px; font-family:Arial,sans-serif;">Who to watch</h2>
             </div>
             {who_html}
